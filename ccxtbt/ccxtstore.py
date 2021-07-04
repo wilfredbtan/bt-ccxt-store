@@ -21,12 +21,17 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+import sys
 import time
 from datetime import datetime
 from functools import wraps
+from pprint import pprint
 
-import backtrader as bt
 import ccxt
+import backtrader as bt
+
+from binance import ThreadedWebsocketManager
+
 from backtrader.metabase import MetaParams
 from backtrader.utils.py3 import with_metaclass
 from ccxt.base.errors import NetworkError, ExchangeError
@@ -46,6 +51,10 @@ class MetaSingleton(MetaParams):
 
         return cls._singleton
 
+# Decorator to mark methods to register in websocket
+def socketregister(f):
+    f._socketregister = True
+    return f
 
 class CCXTStore(with_metaclass(MetaSingleton, object)):
     '''API provider for CCXT feed and broker classes.
@@ -95,14 +104,22 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
         '''Returns broker with *args, **kwargs from registered ``BrokerCls``'''
         return cls.BrokerCls(*args, **kwargs)
 
-    def __init__(self, exchange, currency, config, retries, debug=False, sandbox=False):
+    def __init__(self, exchange, currency, symbol, config, retries, balance_type=None, debug=False, sandbox=False):
         self.exchange = getattr(ccxt, exchange)(config)
         if sandbox:
             self.exchange.set_sandbox_mode(True)
+
+        self.broker = None
         self.currency = currency
+        self.symbol = symbol
         self.retries = retries
         self.debug = debug
-        balance = self.exchange.fetch_balance() if 'secret' in config else 0
+
+        if balance_type:
+            balance_type_dict = {'type': balance_type}
+            balance = self.exchange.fetch_balance(balance_type_dict) if 'secret' in config else 0
+        else:
+            balance = self.exchange.fetch_balance() if 'secret' in config else 0
 
         if balance == 0 or not balance['free'][currency]:
             self._cash = 0
@@ -113,6 +130,26 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
             self._value = 0
         else:
             self._value = balance['total'][currency]
+        
+        # Websocket init
+        self.twm = ThreadedWebsocketManager(api_key=config['apiKey'], api_secret=config['secret'], testnet=sandbox)
+        self.twm.start()
+        self.twm.start_futures_socket(callback=self.handle_socket_message)
+        # Cannot join or it will block
+        # self.twm.join()
+    
+    def handle_socket_message(self, msg):
+        if msg['e'] == 'ORDER_TRADE_UPDATE':
+            self.broker.push_trade_message(msg)
+    
+    def start(self, broker):
+        self.broker = broker
+
+    def stop(self):
+        try:
+            self.twm.stop()  # disconnect should be an invariant
+        except AttributeError:
+            pass    # conn may have never been connected and lack "disconnect"
 
     def get_granularity(self, timeframe, compression):
         if not self.exchange.has['fetchOHLCV']:
@@ -179,6 +216,10 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
     @retry
     def fetch_trades(self, symbol):
         return self.exchange.fetch_trades(symbol)
+
+    @retry
+    def fetch_my_trades(self, symbol):
+        return self.exchange.fetch_my_trades(symbol)
 
     @retry
     def fetch_ohlcv(self, symbol, timeframe, since, limit, params={}):
