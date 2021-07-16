@@ -36,6 +36,7 @@ from backtrader.metabase import MetaParams
 from backtrader.utils.py3 import with_metaclass
 from ccxt.base.errors import NetworkError, ExchangeError
 
+BINANCEUSDM = 'binanceusdm'
 
 class MetaSingleton(MetaParams):
     '''Metaclass to make a metaclassed class a singleton'''
@@ -105,6 +106,7 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
         return cls.BrokerCls(*args, **kwargs)
 
     def __init__(self, exchange, currency, symbol, config, retries, balance_type=None, debug=False, sandbox=False):
+        # Exchange Structure: https://ccxt.readthedocs.io/en/latest/manual.html#exchange-structure
         self.exchange = getattr(ccxt, exchange)(config)
         if sandbox:
             self.exchange.set_sandbox_mode(True)
@@ -131,14 +133,15 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
         else:
             self._value = balance['total'][currency]
         
-        # Websocket init
-        self.twm = ThreadedWebsocketManager(api_key=config['apiKey'], api_secret=config['secret'], testnet=sandbox)
-        self.twm.start()
-        self.twm.start_futures_socket(callback=self.handle_socket_message)
-        # Cannot join or it will block
-        # self.twm.join()
+        if self.exchange.id == BINANCEUSDM:
+            # Binance Websocket init
+            self.twm = ThreadedWebsocketManager(api_key=config['apiKey'], api_secret=config['secret'], testnet=sandbox)
+            self.twm.start()
+            self.twm.start_futures_socket(callback=self.handle_binance_socket_message)
+            # Cannot join or it will block
+            # self.twm.join()
     
-    def handle_socket_message(self, msg):
+    def handle_binance_socket_message(self, msg):
         if msg['e'] == 'ORDER_TRADE_UPDATE':
             self.broker.push_trade_message(msg)
     
@@ -147,7 +150,8 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
 
     def stop(self):
         try:
-            self.twm.stop()  # disconnect should be an invariant
+            if self.exchange.id == BINANCEUSDM:
+                self.twm.stop()  # disconnect should be an invariant
         except AttributeError:
             pass    # conn may have never been connected and lack "disconnect"
 

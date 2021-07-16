@@ -37,8 +37,9 @@ from backtrader.utils.py3 import queue, with_metaclass
 
 from ccxt.base.errors import NetworkError, ExchangeError
 
-from .ccxtstore import CCXTStore
+from .ccxtstore import BINANCEUSDM, CCXTStore
 
+BINANCEUSDM = 'binanceusdm'
 
 class CCXTOrder(OrderBase):
     def __init__(self, owner, data, ccxt_order):
@@ -148,7 +149,11 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         # self.open_orders = list()
         self.open_orders = {}
 
-        self.get_balance()
+        params = {}
+        if self.store.exchange.id == 'bitfinex':
+            params['type'] = 'derivatives'
+        self.get_wallet_balance(currency=self.currency, params=params)
+
         self.startingcash = self.store._cash
         self.startingvalue = self.store._value
 
@@ -206,45 +211,6 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
         return pos
     
 
-    def get_order_trades(self, order_id, symbol):
-        '''
-        Trade Structure
-        {
-            'amount': 0.1, 
-            'cost': 3468.67, 
-            'datetime': '2021-07-01T08:56:12.103Z', 
-            'fee': {'cost': 1.387468, 'currency': 'USDT'}, 
-            'id': '185368459', 
-            'info': {
-                'buyer': False, 
-                'commission': '1.38746800', 
-                'commissionAsset': 'USDT',
-                'id': '185368459',
-                'maker': False,
-                'marginAsset': 'USDT',
-                'orderId': '2731575134',
-                'positionSide': 'BOTH',
-                'price': '34686.70',
-                'qty': '0.100',
-                'quoteQty': '3468.67000',
-                'realizedPnl': '-0.04092333',
-                'side': 'SELL',
-                'symbol': 'BTCUSDT',
-                'time': '1625129772103'
-            },
-            'order': '2731575134',
-            'price': 34686.7,
-            'side': 'sell',
-            'symbol': 'BTC/USDT',
-            'takerOrMaker': 'taker',
-            'timestamp': 1625129772103,
-            'type': None
-        }
-        '''
-        ccxt_my_trades = self.store.fetch_my_trades(symbol)
-        # order_trades = list(filter(lambda d: d['order'] in ccxt_my_trades))
-        order_trades = [d for d in ccxt_my_trades if d['order'] == order_id]
-        return order_trades
     
     def next(self):
         self.notifs.put(None)
@@ -277,7 +243,6 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
             **kwargs):
         del kwargs['parent']
         del kwargs['transmit']
-        print("======= BUY SIZE: ", size)
         return self._submit(owner, data, exectype, 'buy', size, price, kwargs)
 
     def sell(self, owner, data, size, price=None, plimit=None,
@@ -286,7 +251,6 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
              **kwargs):
         del kwargs['parent']
         del kwargs['transmit']
-        print("======= SELL SIZE: ", size)
         return self._submit(owner, data, exectype, 'sell', size, price, kwargs)
 
     def cancel(self, order):
@@ -353,6 +317,9 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
 
     # Mapping of message: https://binance-docs.github.io/apidocs/futures/en/#event-order-update
     def push_trade_message(self, msg):
+        if not self.store.exchange.id == BINANCEUSDM:
+            return
+
         '''
         CCXT Order Structure
         {'amount': 0.1,
@@ -429,6 +396,12 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
                 if self.debug:
                     print("====== Neither filled nor partially filled. staus: ", status)
                 return
+
+            position_response = self.store.exchange.fapiPrivate_get_positionrisk ({
+                'symbol': "BTCUSDT"
+            })
+            print("Retrieved response in ccxt broker")
+            pprint(position_response)
 
             data = order.data
             pos = self.getposition(data, clone=False)
@@ -515,3 +488,42 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
             
             self.get_balance()
 
+    def get_order_trades(self, order_id, symbol):
+        '''
+        Trade Structure
+        {
+            'amount': 0.1, 
+            'cost': 3468.67, 
+            'datetime': '2021-07-01T08:56:12.103Z', 
+            'fee': {'cost': 1.387468, 'currency': 'USDT'}, 
+            'id': '185368459', 
+            'info': {
+                'buyer': False, 
+                'commission': '1.38746800', 
+                'commissionAsset': 'USDT',
+                'id': '185368459',
+                'maker': False,
+                'marginAsset': 'USDT',
+                'orderId': '2731575134',
+                'positionSide': 'BOTH',
+                'price': '34686.70',
+                'qty': '0.100',
+                'quoteQty': '3468.67000',
+                'realizedPnl': '-0.04092333',
+                'side': 'SELL',
+                'symbol': 'BTCUSDT',
+                'time': '1625129772103'
+            },
+            'order': '2731575134',
+            'price': 34686.7,
+            'side': 'sell',
+            'symbol': 'BTC/USDT',
+            'takerOrMaker': 'taker',
+            'timestamp': 1625129772103,
+            'type': None
+        }
+        '''
+        ccxt_my_trades = self.store.fetch_my_trades(symbol)
+        # order_trades = list(filter(lambda d: d['order'] in ccxt_my_trades))
+        order_trades = [d for d in ccxt_my_trades if d['order'] == order_id]
+        return order_trades
