@@ -397,11 +397,11 @@ class CCXTBroker(with_metaclass(MetaCCXTBroker, BrokerBase)):
                     print("====== Neither filled nor partially filled. staus: ", status)
                 return
 
-            position_response = self.store.exchange.fapiPrivate_get_positionrisk ({
-                'symbol': "BTCUSDT"
-            })
-            print("Retrieved response in ccxt broker")
-            pprint(position_response)
+            # position_response = self.store.exchange.fapiPrivate_get_positionrisk ({
+            #     'symbol': "BTCUSDT"
+            # })
+            # print("Retrieved response in ccxt broker")
+            # pprint(position_response)
 
             data = order.data
             pos = self.getposition(data, clone=False)
