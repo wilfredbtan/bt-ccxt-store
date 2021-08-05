@@ -138,6 +138,8 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
             self.twm = ThreadedWebsocketManager(api_key=config['apiKey'], api_secret=config['secret'], testnet=sandbox)
             self.twm.start()
             self.twm.start_futures_socket(callback=self.handle_binance_socket_message)
+            # Need a more constant sock to keep socket open
+            self.twm.start_kline_socket(callback=self.handle_binance_socket_message, symbol=symbol)
             # Cannot join or it will block
             # self.twm.join()
     
